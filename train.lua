@@ -10,12 +10,15 @@
 --
 
 local optim = require 'optim'
+require 'nn'
 
 local M = {}
 local Trainer = torch.class('resnet.Trainer', M)
 
-function Trainer:__init(model, criterion, opt, optimState)
+function Trainer:__init(model, linear_pps, slimModel, criterion, opt, optimState)
    self.model = model
+   self.linear_pps = linear_pps
+   self.slimModel = slimModel
    self.criterion = criterion
    self.optimState = optimState or {
       learningRate = opt.LR,
@@ -26,7 +29,7 @@ function Trainer:__init(model, criterion, opt, optimState)
       weightDecay = opt.weightDecay,
    }
    self.opt = opt
-   self.params, self.gradParams = model:getParameters()
+   self.params, self.gradParams = slimModel:getParameters()
 end
 
 function Trainer:train(epoch, dataloader)
@@ -52,18 +55,20 @@ function Trainer:train(epoch, dataloader)
 
       -- Copy input and target to the GPU
       self:copyInputs(sample)
-
+      --Add Linear_PPS layer as a additional positive sample
       local output = self.model:forward(self.input):float()
       local batchSize = output:size(1)
-      local loss = self.criterion:forward(self.model.output, self.target)
+      local linear_pps_output = self.linear_pps:forward(self.model.output)
+      local loss = self.criterion:forward(linear_pps_output, self.target)
 
-      self.model:zeroGradParameters()
-      self.criterion:backward(self.model.output, self.target)
-      self.model:backward(self.input, self.criterion.gradInput)
+      self.slimModel:zeroGradParameters()
+      self.criterion:backward(linear_pps_output, self.target)
+      self.linear_pps:backward(self.model.output, self.criterion.gradInput, 1, self.target)
+      self.model:backward(self.input, self.linear_pps.gradInput)
 
       optim.sgd(feval, self.params, self.optimState)
 
-      local top1, top5 = self:computeScore(output, sample.target, 1)
+      local top1, top5 = self:computeScore(linear_pps_output:float(), sample.target, 1)
       top1Sum = top1Sum + top1*batchSize
       top5Sum = top5Sum + top5*batchSize
       lossSum = lossSum + loss*batchSize
@@ -99,12 +104,12 @@ function Trainer:test(epoch, dataloader)
 
       -- Copy input and target to the GPU
       self:copyInputs(sample)
-
-      local output = self.model:forward(self.input):float()
+      local model_output = self.model:forward(self.input)
+      local output = self.linear_pps:forward(model_output)
       local batchSize = output:size(1) / nCrops
-      local loss = self.criterion:forward(self.model.output, self.target)
+      local loss = self.criterion:forward(output, self.target)
 
-      local top1, top5 = self:computeScore(output, sample.target, nCrops)
+      local top1, top5 = self:computeScore(output:float(), sample.target, nCrops)
       top1Sum = top1Sum + top1*batchSize
       top5Sum = top5Sum + top5*batchSize
       N = N + batchSize
@@ -166,7 +171,7 @@ function Trainer:learningRate(epoch)
    -- Training schedule
    local decay = 0
    if self.opt.dataset == 'imagenet' then
-      decay = math.floor((epoch - 1) / 30)
+      decay = math.floor((epoch - 1) / 20)
    elseif self.opt.dataset == 'cifar10' then
       decay = epoch >= 122 and 2 or epoch >= 81 and 1 or 0
    elseif self.opt.dataset == 'cifar100' then

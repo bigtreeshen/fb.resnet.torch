@@ -27,13 +27,13 @@ cutorch.manualSeedAll(opt.manualSeed)
 local checkpoint, optimState = checkpoints.latest(opt)
 
 -- Create model
-local model, criterion = models.setup(opt, checkpoint)
+local model, linear_pps, slimModel, criterion = models.setup(opt, checkpoint)
 
 -- Data loading
 local trainLoader, valLoader = DataLoader.create(opt)
 
 -- The trainer handles the training loop and evaluation on validation set
-local trainer = Trainer(model, criterion, opt, optimState)
+local trainer = Trainer(model, linear_pps, slimModel, criterion, opt, optimState)
 
 if opt.testOnly then
    local top1Err, top5Err = trainer:test(0, valLoader)
@@ -59,7 +59,7 @@ for epoch = startEpoch, opt.nEpochs do
       print(' * Best model ', testTop1, testTop5)
    end
 
-   checkpoints.save(epoch, model, trainer.optimState, bestModel, opt)
+   checkpoints.save(epoch, slimModel, trainer.optimState, bestModel, opt)
 end
 
 print(string.format(' * Finished top1: %6.3f  top5: %6.3f', bestTop1, bestTop5))

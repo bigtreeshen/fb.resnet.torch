@@ -13,7 +13,7 @@
 require 'nn'
 require 'cunn'
 require 'cudnn'
-
+require 'models/Linear_PPS'
 local M = {}
 
 function M.setup(opt, checkpoint)
@@ -59,11 +59,18 @@ function M.setup(opt, checkpoint)
       assert(torch.type(orig) == 'nn.Linear',
          'expected last layer to be fully connected')
 
-      local linear = nn.Linear(orig.weight:size(2), opt.nClasses)
-      linear.bias:zero()
+--      local linear = nn.Linear(orig.weight:size(2), opt.nClasses)
+--      linear.bias:zero()
 
       model:remove(#model.modules)
-      model:add(linear:cuda())
+      -- model:add(linear:cuda())
+      local mask_layer = nn.CMul(2048,7,7)
+      mask_layer.weight:zero():fill(1)
+      mask_layer.weight:sub(1,2048,1,3,1,3):fill(0)
+      mask_layer.accGradParameters = function() end
+      mask_layer.updateParameters = function() end
+      model:insert(mask_layer:cuda(),9)
+
    end
 
    -- Set the CUDNN flags
@@ -76,7 +83,12 @@ function M.setup(opt, checkpoint)
          if m.setMode then m:setMode(1, 1, 1) end
       end)
    end
-
+   --Create our own linear layer
+   local linear_pps = nn.Linear_PPS(2048, 30000):cuda()
+   linear_pps.weight:normal(0, 0.001)
+   linear_pps.bias:zero()
+   --Create the hole model as slimModel for sgd
+   local slimModel = nn.Sequential():add(model):add(linear_pps):cuda()
    -- Wrap the model with DataParallelTable, if using more than one GPU
    if opt.nGPU > 1 then
       local gpus = torch.range(1, opt.nGPU):totable()
@@ -94,7 +106,7 @@ function M.setup(opt, checkpoint)
    end
 
    local criterion = nn.CrossEntropyCriterion():cuda()
-   return model, criterion
+   return model, linear_pps, slimModel, criterion
 end
 
 function M.shareGradInput(model)
