@@ -13,6 +13,7 @@
 require 'nn'
 require 'cunn'
 require 'cudnn'
+require 'models/RandProjCrossEntropyCriterion'
 
 local M = {}
 
@@ -58,12 +59,20 @@ function M.setup(opt, checkpoint)
       local orig = model:get(#model.modules)
       assert(torch.type(orig) == 'nn.Linear',
          'expected last layer to be fully connected')
-
       local linear = nn.Linear(orig.weight:size(2), opt.nClasses)
+      linear.weight:normal(0, 0.001)
       linear.bias:zero()
 
       model:remove(#model.modules)
       model:add(linear:cuda())
+
+      local mask_layer = nn.CMul(2048,7,7)
+      mask_layer.weight:zero():fill(1)
+      mask_layer.weight:sub(1,2048,1,3,1,3):fill(0)
+      mask_layer.accGradParameters = function() end
+      mask_layer.updateParameters = function() end
+      model:insert(mask_layer:cuda(),9)
+
    end
 
    -- Set the CUDNN flags
@@ -86,6 +95,7 @@ function M.setup(opt, checkpoint)
          :add(model, gpus)
          :threads(function()
             local cudnn = require 'cudnn'
+	    require 'models/RandProjCrossEntropyCriterion'
             cudnn.fastest, cudnn.benchmark = fastest, benchmark
          end)
       dpt.gradInput = nil
@@ -93,7 +103,7 @@ function M.setup(opt, checkpoint)
       model = dpt:cuda()
    end
 
-   local criterion = nn.CrossEntropyCriterion():cuda()
+   local criterion = nn.RandProjCrossEntropyCriterion():cuda()
    return model, criterion
 end
 
