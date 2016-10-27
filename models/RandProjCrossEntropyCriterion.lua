@@ -2,20 +2,24 @@ require 'nn'
 local Set = require 'pl.Set';
 local RandProjCrossEntropyCriterion, Criterion = torch.class('nn.RandProjCrossEntropyCriterion', 'nn.Criterion')
 
+function RandProjCrossEntropyCriterion:setk(k)
+	self.k = k
+end
+
 function RandProjCrossEntropyCriterion:__init(weights)
    Criterion.__init(self)
    self.lsm = nn.LogSoftMax()
    self.nll = nn.ClassNLLCriterion(weights)
-   self.rand_proj_num = 30000 --random projection number
+   self.rand_proj_num = self.k --random projection number
    self.target_table = {} --save the different classes in the minibatch
    self.target_proj = torch.Tensor() --save the new target, the length should be equal to the batchsize
    self.rand_proj_table = {} --save the rand_proj classes
-print('init done')
 end
 
 function RandProjCrossEntropyCriterion:updateOutput(input, target)
 	input = input:squeeze()
 	target = type(target) == 'number' and target or target:squeeze()
+	self.rand_proj_num = self.k --random projection number
 --clear the target_table in the begining of each training iteration
 	self.target_table = {}
 --pick out different classes in a mini-batch

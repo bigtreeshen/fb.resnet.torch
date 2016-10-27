@@ -13,6 +13,7 @@ local optim = require 'optim'
 
 local M = {}
 local Trainer = torch.class('resnet.Trainer', M)
+require 'models/RandProjCrossEntropyCriterion'
 
 function Trainer:__init(model, criterion, opt, optimState)
    self.model = model
@@ -52,7 +53,11 @@ function Trainer:train(epoch, dataloader)
 
       -- Copy input and target to the GPU
       self:copyInputs(sample)
-
+      local random_sample_num = 500 * epoch
+      if random_sample_num > 30000 then
+         random_sample_num = 30000
+      end
+      self.criterion:setk(random_sample_num)
       local output = self.model:forward(self.input):float()
       local batchSize = output:size(1)
       local loss = self.criterion:forward(self.model.output, self.target)
